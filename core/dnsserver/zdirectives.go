@@ -43,6 +43,7 @@ var Directives = []string{
 	"forward",
 	"proxy",
 	"erratic",
+	"idetcd",
 	"whoami",
 	"on",
 }
