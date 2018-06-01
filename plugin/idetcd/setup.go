@@ -62,10 +62,6 @@ func setup(c *caddy.Controller) error {
 	return nil
 }
 
-func updateEtcdSlot(localIP net.IP) {
-
-}
-
 func getLocalIPAddress() net.IP {
 	var localIP net.IP
 	interfaces, _ := net.Interfaces()
