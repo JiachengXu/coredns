@@ -3,10 +3,12 @@ package idetcd
 
 import (
 	"context"
-	"fmt"
+	"net"
+	"strings"
 	"time"
 
 	"github.com/coredns/coredns/plugin"
+	"github.com/coredns/coredns/request"
 	etcdc "github.com/coreos/etcd/client"
 	"github.com/miekg/dns"
 )
@@ -17,18 +19,30 @@ type Idetcd struct {
 	Ctx       context.Context
 	Client    etcdc.KeysAPI
 	endpoints []string
+	pattern   string
+	id        string
 }
 
 //ServeDNS implements the plugin.Handler interface
 func (idetcd *Idetcd) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
-	//state := request.Request{W: w, Req: r}
+	state := request.Request{W: w, Req: r}
+	a := new(dns.Msg)
+	a.SetReply(r)
+	a.Authoritative = true
+	qname := state.Name()
+	id := strings.Split(qname, ".")[0]
+	resp, _ := idetcd.get(id)
+	ip := resp.Node.Value
+	var rr dns.RR
+	switch state.QType() {
+	case dns.TypeA:
+		rr = new(dns.A)
+		rr.(*dns.A).Hdr = dns.RR_Header{Name: qname, Rrtype: dns.TypeA, Class: state.QClass()}
+		rr.(*dns.A).A = net.ParseIP(ip).To4()
 
-	resp, _ := idetcd.get("Test")
-	fmt.Printf("%q key has %q value\n", resp.Node.Key, resp.Node.Value)
-	//a := new(dns.Msg)
-	//a.SetReply(r)
-	//a.Authoritative = true
-	//w.WriteMsg(a)
+	}
+	a.Answer = []dns.RR{rr}
+	w.WriteMsg(a)
 	return plugin.NextOrFailure(idetcd.Name(), idetcd.Next, ctx, w, r)
 }
 
@@ -37,7 +51,10 @@ func (idetcd *Idetcd) set(key string, value string) (*etcdc.Response, error) {
 
 	ctx, cancel := context.WithTimeout(idetcd.Ctx, 5*time.Second)
 	defer cancel()
-	r, err := idetcd.Client.Set(ctx, key, value, nil)
+	setOptions := etcdc.SetOptions{
+		TTL: defaultTTL * time.Second,
+	}
+	r, err := idetcd.Client.Set(ctx, key, value, &setOptions)
 	if err != nil {
 		return nil, err
 	}
