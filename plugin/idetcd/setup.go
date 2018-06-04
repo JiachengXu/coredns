@@ -1,10 +1,12 @@
 package idetcd
 
 import (
+	"bytes"
 	"context"
 	"net"
 	"strconv"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/coredns/coredns/core/dnsserver"
@@ -33,15 +35,23 @@ func setup(c *caddy.Controller) error {
 
 	//find id for node
 	var i = 1
-	for {
-		name := idetc.pattern + strconv.Itoa(i)
+	var namebuf bytes.Buffer
+	var name string
+	for i <= idetc.limit {
+		idetc.ID = i
+		idetc.pattern.Execute(&namebuf, idetc)
+		name = namebuf.String()
 		_, err := idetc.get(name)
 		if etcdc.IsKeyNotFound(err) {
-			idetc.id = name
 			idetc.set(name, localIP.String())
 			break
 		}
 		i++
+		namebuf.Reset()
+	}
+
+	if i > idetc.limit {
+		return plugin.Error("idetcd", c.ArgErr())
 	}
 
 	//update the record in the etcd
@@ -50,7 +60,7 @@ func setup(c *caddy.Controller) error {
 		for {
 			select {
 			case <-renewTicker.C:
-				idetc.set(idetc.id, localIP.String())
+				idetc.set(namebuf.String(), localIP.String())
 			}
 		}
 	}()
@@ -82,7 +92,9 @@ func idetcdParse(c *caddy.Controller) (*Idetcd, error) {
 	}
 	var (
 		endpoints = []string{defaultEndpoint}
-		pattern   = defaultPattern
+		pattern   = template.New("idetcd")
+		limit     = defaultLimit
+		err       error
 	)
 	for c.Next() {
 		for c.NextBlock() {
@@ -98,7 +110,19 @@ func idetcdParse(c *caddy.Controller) (*Idetcd, error) {
 				if len(args) != 1 {
 					return &Idetcd{}, c.ArgErr()
 				}
-				pattern = args[0]
+				pattern, err = pattern.Parse(args[0])
+				if err != nil {
+					return &Idetcd{}, c.ArgErr()
+				}
+			case "limit":
+				args := c.RemainingArgs()
+				if len(args) != 1 {
+					return &Idetcd{}, c.ArgErr()
+				}
+				limit, err = strconv.Atoi(args[0])
+				if err != nil {
+					return &Idetcd{}, c.ArgErr()
+				}
 			}
 		}
 	}
@@ -109,6 +133,7 @@ func idetcdParse(c *caddy.Controller) (*Idetcd, error) {
 	idetc.endpoints = endpoints
 	idetc.Client = client
 	idetc.pattern = pattern
+	idetc.limit = limit
 	return &idetc, nil
 
 }
@@ -126,6 +151,6 @@ func newEtcdClient(endpoints []string) (etcdc.KeysAPI, error) {
 
 const (
 	defaultEndpoint = "http://localhost:2379"
-	defaultPattern  = "worker"
 	defaultTTL      = 10
+	defaultLimit    = 10
 )

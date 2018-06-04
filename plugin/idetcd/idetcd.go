@@ -5,6 +5,7 @@ import (
 	"context"
 	"net"
 	"strings"
+	"text/template"
 	"time"
 
 	"github.com/coredns/coredns/plugin"
@@ -19,8 +20,9 @@ type Idetcd struct {
 	Ctx       context.Context
 	Client    etcdc.KeysAPI
 	endpoints []string
-	pattern   string
-	id        string
+	pattern   *template.Template
+	ID        int
+	limit     int
 }
 
 //ServeDNS implements the plugin.Handler interface
