@@ -3,6 +3,7 @@ package idetcd
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net"
 	"strconv"
 	"strings"
@@ -37,17 +38,23 @@ func setup(c *caddy.Controller) error {
 	var i = 1
 	var namebuf bytes.Buffer
 	var name string
+	setOptions := etcdc.SetOptions{
+		PrevExist: etcdc.PrevNoExist,
+		TTL:       defaultTTL * time.Second,
+	}
 	for i <= idetc.limit {
 		idetc.ID = i
 		idetc.pattern.Execute(&namebuf, idetc)
 		name = namebuf.String()
-		_, err := idetc.get(name)
-		if etcdc.IsKeyNotFound(err) {
-			idetc.set(name, localIP.String())
+		_, err = idetc.set(name, localIP.String(), setOptions)
+		fmt.Printf("set node %s\n", name)
+		if e, ok := err.(etcdc.Error); ok && e.Code == etcdc.ErrorCodeNodeExist {
+			fmt.Printf("node %s is already exist!\n", name)
+			i++
+			namebuf.Reset()
+		} else {
 			break
 		}
-		i++
-		namebuf.Reset()
 	}
 
 	if i > idetc.limit {
@@ -56,11 +63,15 @@ func setup(c *caddy.Controller) error {
 
 	//update the record in the etcd
 	renewTicker := time.NewTicker(defaultTTL / 2 * time.Second)
+	setOptionsRenew := etcdc.SetOptions{
+		TTL: defaultTTL * time.Second,
+	}
 	go func() {
 		for {
 			select {
 			case <-renewTicker.C:
-				idetc.set(namebuf.String(), localIP.String())
+				idetc.set(namebuf.String(), localIP.String(), setOptionsRenew)
+				fmt.Printf("Renew node %s\n", namebuf.String())
 			}
 		}
 	}()
@@ -151,6 +162,6 @@ func newEtcdClient(endpoints []string) (etcdc.KeysAPI, error) {
 
 const (
 	defaultEndpoint = "http://localhost:2379"
-	defaultTTL      = 10
+	defaultTTL      = 20
 	defaultLimit    = 10
 )

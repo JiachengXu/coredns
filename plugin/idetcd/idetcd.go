@@ -3,8 +3,8 @@ package idetcd
 
 import (
 	"context"
+	"fmt"
 	"net"
-	"strings"
 	"text/template"
 	"time"
 
@@ -32,8 +32,8 @@ func (idetcd *Idetcd) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns
 	a.SetReply(r)
 	a.Authoritative = true
 	qname := state.Name()
-	id := strings.Split(qname, ".")[0]
-	resp, _ := idetcd.get(id)
+	fmt.Println(qname)
+	resp, _ := idetcd.get(qname)
 	ip := resp.Node.Value
 	var rr dns.RR
 	switch state.QType() {
@@ -49,16 +49,13 @@ func (idetcd *Idetcd) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns
 }
 
 //set is a wrapper for client.Set
-func (idetcd *Idetcd) set(key string, value string) (*etcdc.Response, error) {
+func (idetcd *Idetcd) set(key string, value string, setOptions etcdc.SetOptions) (*etcdc.Response, error) {
 
 	ctx, cancel := context.WithTimeout(idetcd.Ctx, 5*time.Second)
 	defer cancel()
-	setOptions := etcdc.SetOptions{
-		TTL: defaultTTL * time.Second,
-	}
 	r, err := idetcd.Client.Set(ctx, key, value, &setOptions)
 	if err != nil {
-		return nil, err
+		return r, err
 	}
 	return r, nil
 }
