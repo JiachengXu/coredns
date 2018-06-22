@@ -33,10 +33,10 @@ func setup(c *caddy.Controller) error {
 		return plugin.Error("idetcd", c.ArgErr())
 	}
 	localIP := getLocalIPAddress()
-
+	var namebuf bytes.Buffer
+	killChan := make(chan struct{})
 	//find id for node
 	var i = 1
-	var namebuf bytes.Buffer
 	var name string
 	setOptions := etcdc.SetOptions{
 		PrevExist: etcdc.PrevNoExist,
@@ -72,9 +72,15 @@ func setup(c *caddy.Controller) error {
 			case <-renewTicker.C:
 				idetc.set(namebuf.String(), localIP.String(), setOptionsRenew)
 				fmt.Printf("Renew node %s\n", namebuf.String())
+			case <-killChan:
+				return
 			}
 		}
 	}()
+	c.OnShutdown(func() error {
+		close(killChan)
+		return nil
+	})
 
 	dnsserver.GetConfig(c).AddPlugin(func(next plugin.Handler) plugin.Handler {
 		idetc.Next = next
