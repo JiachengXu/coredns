@@ -10,7 +10,7 @@ import (
 
 	"github.com/coredns/coredns/plugin"
 	"github.com/coredns/coredns/request"
-	etcdc "github.com/coreos/etcd/client"
+	etcdcv3 "github.com/coreos/etcd/clientv3"
 	"github.com/miekg/dns"
 )
 
@@ -18,7 +18,7 @@ import (
 type Idetcd struct {
 	Next      plugin.Handler
 	Ctx       context.Context
-	Client    etcdc.KeysAPI
+	Client    *etcdcv3.Client
 	endpoints []string
 	pattern   *template.Template
 	ID        int
@@ -34,7 +34,8 @@ func (idetcd *Idetcd) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns
 	qname := state.Name()
 	fmt.Println(qname)
 	resp, _ := idetcd.get(qname)
-	ip := resp.Node.Value
+	ip := string(resp.Kvs[0].Value)
+	fmt.Println(ip)
 	var rr dns.RR
 	switch state.QType() {
 	case dns.TypeA:
@@ -49,11 +50,10 @@ func (idetcd *Idetcd) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns
 }
 
 //set is a wrapper for client.Set
-func (idetcd *Idetcd) set(key string, value string, setOptions etcdc.SetOptions) (*etcdc.Response, error) {
-
+func (idetcd *Idetcd) set(key string, value string, opts ...etcdcv3.OpOption) (*etcdcv3.PutResponse, error) {
 	ctx, cancel := context.WithTimeout(idetcd.Ctx, 5*time.Second)
 	defer cancel()
-	r, err := idetcd.Client.Set(ctx, key, value, &setOptions)
+	r, err := idetcd.Client.Put(ctx, key, value, opts...)
 	if err != nil {
 		return r, err
 	}
@@ -61,10 +61,10 @@ func (idetcd *Idetcd) set(key string, value string, setOptions etcdc.SetOptions)
 }
 
 // get is a wrapper for client.Get
-func (idetcd *Idetcd) get(key string) (*etcdc.Response, error) {
+func (idetcd *Idetcd) get(key string) (*etcdcv3.GetResponse, error) {
 	ctx, cancel := context.WithTimeout(idetcd.Ctx, 5*time.Second)
 	defer cancel()
-	r, err := idetcd.Client.Get(ctx, key, nil)
+	r, err := idetcd.Client.Get(ctx, key)
 	if err != nil {
 		return nil, err
 	}

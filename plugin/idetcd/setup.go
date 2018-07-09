@@ -12,7 +12,7 @@ import (
 
 	"github.com/coredns/coredns/core/dnsserver"
 	"github.com/coredns/coredns/plugin"
-	etcdc "github.com/coreos/etcd/client"
+	etcdcv3 "github.com/coreos/etcd/clientv3"
 
 	"github.com/mholt/caddy"
 )
@@ -33,27 +33,33 @@ func setup(c *caddy.Controller) error {
 		return plugin.Error("idetcd", c.ArgErr())
 	}
 	localIP := getLocalIPAddress()
+
 	var namebuf bytes.Buffer
 	killChan := make(chan struct{})
 	//find id for node
 	var i = 1
 	var name string
-	setOptions := etcdc.SetOptions{
-		PrevExist: etcdc.PrevNoExist,
-		TTL:       defaultTTL * time.Second,
-	}
+	//create a lease
 	for i <= idetc.limit {
 		idetc.ID = i
 		idetc.pattern.Execute(&namebuf, idetc)
 		name = namebuf.String()
-		_, err = idetc.set(name, localIP.String(), setOptions)
-		fmt.Printf("set node %s\n", name)
-		if e, ok := err.(etcdc.Error); ok && e.Code == etcdc.ErrorCodeNodeExist {
+		resp, err := idetc.get(name)
+		if err != nil {
+			return err
+		}
+		if len(resp.Kvs) == 0 {
+			lease, err := idetc.Client.Grant(context.TODO(), defaultTTL)
+			_, err = idetc.set(name, localIP.String(), etcdcv3.WithLease(lease.ID))
+			if err != nil {
+				fmt.Println(err.Error())
+			}
+			fmt.Printf("set node %s\n", name)
+			break
+		} else {
 			fmt.Printf("node %s is already exist!\n", name)
 			i++
 			namebuf.Reset()
-		} else {
-			break
 		}
 	}
 
@@ -63,15 +69,19 @@ func setup(c *caddy.Controller) error {
 
 	//update the record in the etcd
 	renewTicker := time.NewTicker(defaultTTL / 2 * time.Second)
-	setOptionsRenew := etcdc.SetOptions{
-		TTL: defaultTTL * time.Second,
-	}
 	go func() {
 		for {
 			select {
 			case <-renewTicker.C:
-				idetc.set(namebuf.String(), localIP.String(), setOptionsRenew)
-				fmt.Printf("Renew node %s\n", namebuf.String())
+				resp, err := idetc.get(name)
+				if err != nil {
+					return
+				}
+				if len(resp.Kvs) == 0 || string(resp.Kvs[0].Value) == localIP.String() {
+					lease, _ := idetc.Client.Grant(context.TODO(), defaultTTL)
+					idetc.set(namebuf.String(), localIP.String(), etcdcv3.WithLease(lease.ID))
+					fmt.Printf("Renew node %s\n", namebuf.String())
+				}
 			case <-killChan:
 				return
 			}
@@ -93,7 +103,7 @@ func getLocalIPAddress() net.IP {
 	var localIP net.IP
 	interfaces, _ := net.Interfaces()
 	for _, inter := range interfaces {
-		if inter.Name == "eth0" || inter.Name == "en0" {
+		if inter.Name == "eth0" || inter.Name == "en0" || inter.Name == "ens4" {
 			addrs, _ := inter.Addrs()
 			for _, addr := range addrs {
 				localIP = net.ParseIP(strings.Split(addr.String(), "/")[0])
@@ -155,15 +165,15 @@ func idetcdParse(c *caddy.Controller) (*Idetcd, error) {
 
 }
 
-func newEtcdClient(endpoints []string) (etcdc.KeysAPI, error) {
-	etcdCfg := etcdc.Config{
+func newEtcdClient(endpoints []string) (*etcdcv3.Client, error) {
+	etcdCfg := etcdcv3.Config{
 		Endpoints: endpoints,
 	}
-	cli, err := etcdc.New(etcdCfg)
+	cli, err := etcdcv3.New(etcdCfg)
 	if err != nil {
 		return nil, err
 	}
-	return etcdc.NewKeysAPI(cli), nil
+	return cli, nil
 }
 
 const (
