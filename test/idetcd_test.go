@@ -1,9 +1,10 @@
 //etcd local instance is needed.
-
 package test
 
 import (
+	"net"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +14,8 @@ import (
 	"github.com/mholt/caddy"
 	"github.com/miekg/dns"
 )
+
+var localIP = getLocalIPAddress().String()
 
 func TestBasicLookupNodesRR(t *testing.T) {
 	corefiles := generateCorefiles(5)
@@ -43,15 +46,15 @@ func TestBasicLookupNodesRR(t *testing.T) {
 		if resp.Answer[0].Header().Rrtype != dns.TypeA {
 			t.Errorf("Expected RR to A, got: %d", resp.Answer[0].Header().Rrtype)
 		}
-		if resp.Answer[0].(*dns.A).A.String() != "192.168.0.73" {
-			t.Errorf("Expected 192.168.0.73, got: %s", resp.Answer[0].(*dns.A).A.String())
+		if resp.Answer[0].(*dns.A).A.String() != localIP {
+			t.Errorf("Expected %s , got: %s", localIP, resp.Answer[0].(*dns.A).A.String())
 		}
 	}
 	time.Sleep(10 * time.Second)
 	for _, node := range nodes {
 		node.ShutdownCallbacks()
 	}
-	time.Sleep(20 * time.Second)
+	time.Sleep(30 * time.Second)
 }
 
 func TestNodeUpAfterTTL(t *testing.T) {
@@ -83,8 +86,8 @@ func TestNodeUpAfterTTL(t *testing.T) {
 		if resp.Answer[0].Header().Rrtype != dns.TypeA {
 			t.Errorf("Expected RR to A, got: %d", resp.Answer[0].Header().Rrtype)
 		}
-		if resp.Answer[0].(*dns.A).A.String() != "192.168.0.73" {
-			t.Errorf("Expected 192.168.0.73, got: %s", resp.Answer[0].(*dns.A).A.String())
+		if resp.Answer[0].(*dns.A).A.String() != localIP {
+			t.Errorf("Expected %s , got: %s", localIP, resp.Answer[0].(*dns.A).A.String())
 		}
 	}
 	////should fail when check the 5th one
@@ -115,8 +118,8 @@ func TestNodeUpAfterTTL(t *testing.T) {
 	if resp.Answer[0].Header().Rrtype != dns.TypeA {
 		t.Errorf("Expected RR to A, got: %d", resp.Answer[0].Header().Rrtype)
 	}
-	if resp.Answer[0].(*dns.A).A.String() != "192.168.0.73" {
-		t.Errorf("Expected 192.168.0.73, got: %s", resp.Answer[0].(*dns.A).A.String())
+	if resp.Answer[0].(*dns.A).A.String() != localIP {
+		t.Errorf("Expected %s , got: %s", localIP, resp.Answer[0].(*dns.A).A.String())
 	}
 	for _, node := range nodes {
 		node.ShutdownCallbacks()
@@ -156,8 +159,8 @@ func TestNodeTakeFreeSlot(t *testing.T) {
 		if resp.Answer[0].Header().Rrtype != dns.TypeA {
 			t.Errorf("Expected RR to A, got: %d", resp.Answer[0].Header().Rrtype)
 		}
-		if resp.Answer[0].(*dns.A).A.String() != "192.168.0.73" {
-			t.Errorf("Expected 192.168.0.73, got: %s", resp.Answer[0].(*dns.A).A.String())
+		if resp.Answer[0].(*dns.A).A.String() != localIP {
+			t.Errorf("Expected %s , got: %s", localIP, resp.Answer[0].(*dns.A).A.String())
 		}
 	}
 	time.Sleep(8 * time.Second)
@@ -193,10 +196,9 @@ func TestNodeTakeFreeSlot(t *testing.T) {
 	if resp.Answer[0].Header().Rrtype != dns.TypeA {
 		t.Errorf("Expected RR to A, got: %d", resp.Answer[0].Header().Rrtype)
 	}
-	if resp.Answer[0].(*dns.A).A.String() != "192.168.0.73" {
-		t.Errorf("Expected 192.168.0.73, got: %s", resp.Answer[0].(*dns.A).A.String())
+	if resp.Answer[0].(*dns.A).A.String() != localIP {
+		t.Errorf("Expected %s , got: %s", localIP, resp.Answer[0].(*dns.A).A.String())
 	}
-
 	node2, _, _, err := CoreDNSServerAndPorts(corefiles[shutDownIdx])
 	if err != nil {
 		t.Fatalf("Could not get CoreDNS serving instance: %s,%d", err, shutDownIdx)
@@ -214,9 +216,10 @@ func TestNodeTakeFreeSlot(t *testing.T) {
 	if resp.Answer[0].Header().Rrtype != dns.TypeA {
 		t.Errorf("Expected RR to A, got: %d", resp.Answer[0].Header().Rrtype)
 	}
-	if resp.Answer[0].(*dns.A).A.String() != "192.168.0.73" {
-		t.Errorf("Expected 192.168.0.73, got: %s", resp.Answer[0].(*dns.A).A.String())
+	if resp.Answer[0].(*dns.A).A.String() != localIP {
+		t.Errorf("Expected %s , got: %s", localIP, resp.Answer[0].(*dns.A).A.String())
 	}
+
 	for _, node := range nodes {
 		node.ShutdownCallbacks()
 	}
@@ -230,7 +233,7 @@ func generateCorefiles(numNode int) []string {
 		port := strconv.Itoa(1053 + i)
 		corefile := `.:` + port + ` {
 			idetcd {
-				endpoint http://localhost:2379 
+				endpoint http://localhost:2379
 				pattern worker{{.ID}}.tf.local.
 				limit ` + limit + `
 			}
@@ -238,4 +241,18 @@ func generateCorefiles(numNode int) []string {
 		corefiles = append(corefiles, corefile)
 	}
 	return corefiles
+}
+func getLocalIPAddress() net.IP {
+	var localIP net.IP
+	interfaces, _ := net.Interfaces()
+	for _, inter := range interfaces {
+		addrs, _ := inter.Addrs()
+		for _, addr := range addrs {
+			localIP = net.ParseIP(strings.Split(addr.String(), "/")[0])
+			if localIP.To4() != nil && !localIP.IsLoopback() {
+				return localIP
+			}
+		}
+	}
+	return localIP
 }

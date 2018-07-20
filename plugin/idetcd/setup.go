@@ -17,6 +17,12 @@ import (
 	"github.com/mholt/caddy"
 )
 
+const (
+	defaultEndpoint = "http://localhost:2379"
+	defaultTTL      = 20
+	defaultLimit    = 10
+)
+
 func init() {
 	caddy.RegisterPlugin("idetcd", caddy.Plugin{
 		ServerType: "dns",
@@ -25,6 +31,7 @@ func init() {
 }
 
 func setup(c *caddy.Controller) error {
+	fmt.Println(dnsserver.Port)
 	idetc, err := idetcdParse(c)
 	if err != nil {
 		return plugin.Error("idetcd", err)
@@ -32,61 +39,65 @@ func setup(c *caddy.Controller) error {
 	if c.NextArg() {
 		return plugin.Error("idetcd", c.ArgErr())
 	}
-	localIP := getLocalIPAddress()
 
-	var namebuf bytes.Buffer
-	killChan := make(chan struct{})
-	//find id for node
-	var i = 1
-	var name string
-	//create a lease
-	for i <= idetc.limit {
-		idetc.ID = i
+	var (
+		namebuf  bytes.Buffer
+		killChan chan struct{}
+		id       = 1
+	)
+
+	localIP := iP()
+	killChan = make(chan struct{})
+
+	for id <= idetc.limit {
+		idetc.ID = id
 		idetc.pattern.Execute(&namebuf, idetc)
-		name = namebuf.String()
+		name := namebuf.String()
 		resp, err := idetc.get(name)
 		if err != nil {
 			return err
 		}
-		if len(resp.Kvs) == 0 {
+		if resp.Count == 0 {
 			lease, err := idetc.Client.Grant(context.TODO(), defaultTTL)
 			_, err = idetc.set(name, localIP.String(), etcdcv3.WithLease(lease.ID))
 			if err != nil {
 				fmt.Println(err.Error())
 			}
-			fmt.Printf("set node %s\n", name)
+			fmt.Printf("set node %s with ip %s\n", name, localIP.String())
 			break
 		} else {
 			fmt.Printf("node %s is already exist!\n", name)
-			i++
+			id++
 			namebuf.Reset()
 		}
 	}
 
-	if i > idetc.limit {
-		return plugin.Error("idetcd", c.ArgErr())
+	if id > idetc.limit {
+		return plugin.Error("idetcd", c.Errf("Could not have more than %d nodes in you cluster.", idetc.limit))
 	}
 
 	//update the record in the etcd
-	renewTicker := time.NewTicker(defaultTTL / 2 * time.Second)
+	renewTicker := time.NewTicker(defaultTTL * time.Second)
 	go func() {
 		for {
 			select {
 			case <-renewTicker.C:
-				resp, err := idetc.get(name)
+				resp, err := idetc.get(namebuf.String())
 				if err != nil {
 					return
 				}
-				if len(resp.Kvs) == 0 || string(resp.Kvs[0].Value) == localIP.String() {
+				if resp.Count == 0 || string(resp.Kvs[0].Value) == localIP.String() {
 					lease, _ := idetc.Client.Grant(context.TODO(), defaultTTL)
 					idetc.set(namebuf.String(), localIP.String(), etcdcv3.WithLease(lease.ID))
-					fmt.Printf("Renew node %s\n", namebuf.String())
+					fmt.Printf("Renew node %s with ip: %s\n", namebuf.String(), localIP.String())
 				}
 			case <-killChan:
+				namebuf.Reset()
 				return
 			}
 		}
 	}()
+
 	c.OnShutdown(func() error {
 		close(killChan)
 		return nil
@@ -99,14 +110,15 @@ func setup(c *caddy.Controller) error {
 	return nil
 }
 
-func getLocalIPAddress() net.IP {
+func iP() net.IP {
 	var localIP net.IP
 	interfaces, _ := net.Interfaces()
 	for _, inter := range interfaces {
-		if inter.Name == "eth0" || inter.Name == "en0" || inter.Name == "ens4" {
-			addrs, _ := inter.Addrs()
-			for _, addr := range addrs {
-				localIP = net.ParseIP(strings.Split(addr.String(), "/")[0])
+		addrs, _ := inter.Addrs()
+		for _, addr := range addrs {
+			localIP = net.ParseIP(strings.Split(addr.String(), "/")[0])
+			if localIP.To4() != nil && !localIP.IsLoopback() {
+				return localIP
 			}
 		}
 	}
@@ -175,9 +187,3 @@ func newEtcdClient(endpoints []string) (*etcdcv3.Client, error) {
 	}
 	return cli, nil
 }
-
-const (
-	defaultEndpoint = "http://localhost:2379"
-	defaultTTL      = 20
-	defaultLimit    = 10
-)

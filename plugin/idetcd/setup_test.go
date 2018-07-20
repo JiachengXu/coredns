@@ -19,44 +19,44 @@ func TestParseIdetcd(t *testing.T) {
 	}{
 		{
 			`idetcd {
-			endpoint http://localhost:2379
-			pattern worker{{.ID}}.local.tf
-			limit 5
+				endpoint http://localhost:2379
+				pattern worker{{.ID}}.local.tf
+				limit 5
 		}`, false, []string{"http://localhost:2379"}, 5, getExpectedPattern(), "",
 		},
 		{
 			`idetcd {
-			endpoint
-			pattern worker{{.ID}}.local.tf
-			limit 5
+				endpoint
+				pattern worker{{.ID}}.local.tf
+				limit 5
 		}`, true, []string{"http://localhost:2379"}, 5, getExpectedPattern(), "",
 		},
 		{
 			`idetcd {
-			endpoint http://localhost:2379
-			pattern 
-			limit 5
+				endpoint http://localhost:2379
+				pattern
+				limit 5
 		}`, true, []string{"http://localhost:2379"}, 5, nil, "",
 		},
 		{
 			`idetcd {
-			endpoint http://localhost:2379
-			pattern worker{{.ID}}.local.tf
-			limit 
+				endpoint http://localhost:2379
+				pattern worker{{.ID}}.local.tf
+				limit
 		}`, true, []string{"http://localhost:2379"}, 5, getExpectedPattern(), "",
 		},
 		{
 			`idetcd {
-			endpoint http://localhost:2379
-			pattern worker{{.ID}}.local.tf
-			limit hello
+				endpoint http://localhost:2379
+				pattern worker{{.ID}}.local.tf
+				limit hello
 		}`, true, []string{"http://localhost:2379"}, 5, getExpectedPattern(), "",
 		},
 		{
 			`idetcd {
-			endpoint http://localhost:2379 http://localhost:3379 http://localhost:4379
-			pattern worker{{.ID}}.local.tf
-			limit 5
+				endpoint http://localhost:2379 http://localhost:3379 http://localhost:4379
+				pattern worker{{.ID}}.local.tf
+				limit 5
 		}`, false, []string{"http://localhost:2379", "http://localhost:3379", "http://localhost:4379"}, 5, getExpectedPattern(), "",
 		},
 	}
