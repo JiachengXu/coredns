@@ -3,6 +3,7 @@ package idetcd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"text/template"
@@ -34,14 +35,21 @@ func (idetcd *Idetcd) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns
 	qname := state.Name()
 	fmt.Println(qname)
 	resp, _ := idetcd.get(qname)
-	ip := string(resp.Kvs[0].Value)
-	fmt.Println(ip)
+	record := new(Record)
+	if err := json.Unmarshal(resp.Kvs[0].Value, record); err != nil {
+		return plugin.NextOrFailure(idetcd.Name(), idetcd.Next, ctx, w, r)
+	}
+	fmt.Printf("%v\n", record)
 	var rr dns.RR
 	switch state.QType() {
 	case dns.TypeA:
 		rr = new(dns.A)
 		rr.(*dns.A).Hdr = dns.RR_Header{Name: qname, Rrtype: dns.TypeA, Class: state.QClass()}
-		rr.(*dns.A).A = net.ParseIP(ip).To4()
+		rr.(*dns.A).A = net.ParseIP(record.Ipv4).To4()
+	case dns.TypeAAAA:
+		rr = new(dns.AAAA)
+		rr.(*dns.AAAA).Hdr = dns.RR_Header{Name: qname, Rrtype: dns.TypeAAAA, Class: state.QClass()}
+		rr.(*dns.AAAA).AAAA = net.ParseIP(record.Ipv6).To16()
 
 	}
 	a.Answer = []dns.RR{rr}

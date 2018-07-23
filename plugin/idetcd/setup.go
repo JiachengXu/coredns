@@ -3,6 +3,7 @@ package idetcd
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"strconv"
@@ -31,7 +32,6 @@ func init() {
 }
 
 func setup(c *caddy.Controller) error {
-	fmt.Println(dnsserver.Port)
 	idetc, err := idetcdParse(c)
 	if err != nil {
 		return plugin.Error("idetcd", err)
@@ -46,7 +46,14 @@ func setup(c *caddy.Controller) error {
 		id       = 1
 	)
 
-	localIP := iP()
+	host := iP()
+	host.Port = dnsserver.GetConfig(c).Port
+	localIP, err := json.Marshal(host)
+	value := string(localIP)
+	fmt.Printf("%v\n", value)
+	if err != nil {
+		return plugin.Error("idetcd", err)
+	}
 	killChan = make(chan struct{})
 
 	for id <= idetc.limit {
@@ -59,11 +66,11 @@ func setup(c *caddy.Controller) error {
 		}
 		if resp.Count == 0 {
 			lease, err := idetc.Client.Grant(context.TODO(), defaultTTL)
-			_, err = idetc.set(name, localIP.String(), etcdcv3.WithLease(lease.ID))
+			_, err = idetc.set(name, value, etcdcv3.WithLease(lease.ID))
 			if err != nil {
 				fmt.Println(err.Error())
 			}
-			fmt.Printf("set node %s with ip %s\n", name, localIP.String())
+			fmt.Printf("set node %s with ip %s\n", name, value)
 			break
 		} else {
 			fmt.Printf("node %s is already exist!\n", name)
@@ -86,10 +93,10 @@ func setup(c *caddy.Controller) error {
 				if err != nil {
 					return
 				}
-				if resp.Count == 0 || string(resp.Kvs[0].Value) == localIP.String() {
+				if resp.Count == 0 || string(resp.Kvs[0].Value) == value {
 					lease, _ := idetc.Client.Grant(context.TODO(), defaultTTL)
-					idetc.set(namebuf.String(), localIP.String(), etcdcv3.WithLease(lease.ID))
-					fmt.Printf("Renew node %s with ip: %s\n", namebuf.String(), localIP.String())
+					idetc.set(namebuf.String(), value, etcdcv3.WithLease(lease.ID))
+					fmt.Printf("Renew node %s with ip: %s\n", namebuf.String(), value)
 				}
 			case <-killChan:
 				namebuf.Reset()
@@ -110,19 +117,22 @@ func setup(c *caddy.Controller) error {
 	return nil
 }
 
-func iP() net.IP {
-	var localIP net.IP
+func iP() Record {
+	record := new(Record)
 	interfaces, _ := net.Interfaces()
 	for _, inter := range interfaces {
 		addrs, _ := inter.Addrs()
 		for _, addr := range addrs {
-			localIP = net.ParseIP(strings.Split(addr.String(), "/")[0])
+			localIP := net.ParseIP(strings.Split(addr.String(), "/")[0])
 			if localIP.To4() != nil && !localIP.IsLoopback() {
-				return localIP
+				record.Ipv4 = localIP.String()
+			}
+			if localIP.To16() != nil && !localIP.IsLoopback() {
+				record.Ipv6 = localIP.String()
 			}
 		}
 	}
-	return localIP
+	return *record
 }
 
 func idetcdParse(c *caddy.Controller) (*Idetcd, error) {
