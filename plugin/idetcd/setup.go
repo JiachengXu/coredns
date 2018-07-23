@@ -120,15 +120,22 @@ func setup(c *caddy.Controller) error {
 func iP() Record {
 	record := new(Record)
 	interfaces, _ := net.Interfaces()
+	var flag bool
 	for _, inter := range interfaces {
-		addrs, _ := inter.Addrs()
-		for _, addr := range addrs {
-			localIP := net.ParseIP(strings.Split(addr.String(), "/")[0])
-			if localIP.To4() != nil && !localIP.IsLoopback() {
-				record.Ipv4 = localIP.String()
+		if inter.Flags&net.FlagLoopback == 0 {
+			flag = false
+			addrs, _ := inter.Addrs()
+			for _, addr := range addrs {
+				localIP := net.ParseIP(strings.Split(addr.String(), "/")[0])
+				if localIP.To4() != nil {
+					record.Ipv4 = localIP.String()
+					flag = true
+				} else if localIP.To16() != nil {
+					record.Ipv6 = localIP.To16().String()
+				}
 			}
-			if localIP.To16() != nil && !localIP.IsLoopback() {
-				record.Ipv6 = localIP.String()
+			if flag {
+				break
 			}
 		}
 	}
